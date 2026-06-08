@@ -45,8 +45,8 @@ export default function Upload({ transactions, onFile, dragOver, setDragOver }) 
           <div style={{ fontSize: 12, color: "#555", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 10 }}>How it works</div>
           <div style={{ fontSize: 13, color: "#666", lineHeight: 1.8 }}>
             1. Upload both CSVs above — they'll be normalized into a unified staging table.<br/>
-            2. In Staging, each transaction defaults to <span className="pill pill-joint">Joint</span>. Tag personal ones as <span className="pill pill-n">N</span> (Nick) or <span className="pill pill-m">M</span> (Madeline).<br/>
-            3. Summary shows totals per card and combined — Joint paid from checking, personal from individual accounts.<br/>
+            2. In Staging, each transaction defaults to <span className="pill pill-c">Checking</span>. Tag personal ones as <span className="pill pill-n">Nick</span> or <span className="pill pill-m">Madeline</span>, or <span className="pill pill-x">Non-Checking</span> for other sources.<br/>
+            3. Summary shows totals per card and combined — Checking paid from joint checking, personal from individual accounts.<br/>
             4. Charts break down spending by category.
           </div>
         </div>

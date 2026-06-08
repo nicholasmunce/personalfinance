@@ -36,7 +36,7 @@ export function parseChase(text) {
       amount: Math.abs(amount),
       type: amount < 0 ? "debit" : "credit",
       card: "Chase Sapphire",
-      owner: "Joint",
+      owner: "C",
     };
   }).filter(r => r.amount > 0 && r.type === "debit");
 }
@@ -73,7 +73,7 @@ export function parseCapitalOne(text) {
       amount: debit,
       type: "debit",
       card: "Capital One",
-      owner: "Joint",
+      owner: "C",
     };
   }).filter(Boolean);
 }

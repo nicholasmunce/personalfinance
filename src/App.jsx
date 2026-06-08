@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { autoDetectAndParse } from './utils/parsers.js';
 import Upload from './components/Upload.jsx';
 import StagingTable from './components/StagingTable.jsx';
@@ -7,6 +7,7 @@ import Charts from './components/Charts.jsx';
 import GroceryVsDining from './components/GroceryVsDining.jsx';
 import DuplicateReview from './components/DuplicateReview.jsx';
 import HistoryView from './components/HistoryView.jsx';
+import Settings from './components/Settings.jsx';
 
 const GLOBAL_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:wght@300;600;900&display=swap');
@@ -23,16 +24,18 @@ const GLOBAL_STYLES = `
   .drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
   .owner-btn { border: 1px solid #2a2d36; background: none; border-radius: 4px; padding: 3px 10px; font-family: inherit; font-size: 11px; cursor: pointer; letter-spacing: .05em; transition: all .15s; color: #888; }
   .owner-btn:hover { border-color: #555; color: #ddd; }
-  .owner-btn.active-Joint { background: rgba(74,222,128,.15); border-color: #4ade80; color: #4ade80; }
+  .owner-btn.active-C { background: rgba(74,222,128,.15); border-color: #4ade80; color: #4ade80; }
   .owner-btn.active-N { background: rgba(96,165,250,.15); border-color: #60a5fa; color: #60a5fa; }
   .owner-btn.active-M { background: rgba(244,114,182,.15); border-color: #f472b6; color: #f472b6; }
+  .owner-btn.active-X { background: rgba(251,146,60,.15); border-color: #fb923c; color: #fb923c; }
   .card-block { background: #13151c; border: 1px solid #1e2029; border-radius: 14px; padding: 28px; }
   .summary-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #1a1c23; }
   .summary-row:last-child { border-bottom: none; }
   .pill { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; }
-  .pill-joint { background: rgba(74,222,128,.15); color: #4ade80; }
+  .pill-c { background: rgba(74,222,128,.15); color: #4ade80; }
   .pill-n { background: rgba(96,165,250,.15); color: #60a5fa; }
   .pill-m { background: rgba(244,114,182,.15); color: #f472b6; }
+  .pill-x { background: rgba(251,146,60,.15); color: #fb923c; }
   .error-bar { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.3); border-radius: 8px; padding: 10px 16px; font-size: 12px; color: #f87171; margin-bottom: 12px; }
   .clear-btn { background: none; border: 1px solid #2a2d36; color: #666; border-radius: 6px; padding: 6px 14px; font-family: inherit; font-size: 12px; cursor: pointer; transition: all .2s; }
   .clear-btn:hover { border-color: #f87171; color: #f87171; }
@@ -47,6 +50,27 @@ export default function App() {
   const [dragOver, setDragOver] = useState(null);
   const [errors, setErrors] = useState([]);
   const [pendingImport, setPendingImport] = useState(null); // { newTxns, dupTxns }
+  const [periodMode, setPeriodMode] = useState(() => localStorage.getItem("periodMode") || "calendar");
+  const [statementDates, setStatementDates] = useState({});
+
+  useEffect(() => {
+    fetch("/api/statement-dates")
+      .then(r => r.json())
+      .then(rows => {
+        const map = {};
+        for (const r of rows) {
+          if (!map[r.card]) map[r.card] = [];
+          map[r.card].push(r.close_date);
+        }
+        setStatementDates(map);
+      })
+      .catch(() => {});
+  }, []);
+
+  function handlePeriodMode(mode) {
+    setPeriodMode(mode);
+    localStorage.setItem("periodMode", mode);
+  }
 
   const ingest = useCallback(async (text, filename) => {
     const { parsed } = await autoDetectAndParse(text, filename);
@@ -106,42 +130,6 @@ export default function App() {
     setPendingImport(null);
   }
 
-  const summary = useMemo(() => {
-    const cards = ["Chase Sapphire", "Capital One"];
-    const result = {};
-    cards.forEach(card => {
-      const txns = transactions.filter(t => t.card === card);
-      result[card] = {
-        Joint: txns.filter(t => t.owner === "Joint").reduce((s, t) => s + t.amount, 0),
-        N: txns.filter(t => t.owner === "N").reduce((s, t) => s + t.amount, 0),
-        M: txns.filter(t => t.owner === "M").reduce((s, t) => s + t.amount, 0),
-      };
-    });
-    result["Combined"] = {
-      Joint: cards.reduce((s, c) => s + (result[c]?.Joint || 0), 0),
-      N: cards.reduce((s, c) => s + (result[c]?.N || 0), 0),
-      M: cards.reduce((s, c) => s + (result[c]?.M || 0), 0),
-    };
-    return result;
-  }, [transactions]);
-
-  const categoryData = useMemo(() => {
-    const map = {};
-    transactions.forEach(t => {
-      const cat = t.category || "Uncategorized";
-      if (!map[cat]) map[cat] = { name: cat, Joint: 0, N: 0, M: 0, total: 0 };
-      map[cat][t.owner] = (map[cat][t.owner] || 0) + t.amount;
-      map[cat].total += t.amount;
-    });
-    return Object.values(map).sort((a, b) => b.total - a.total);
-  }, [transactions]);
-
-  const ownerPieData = useMemo(() => [
-    { name: "Joint", value: summary.Combined?.Joint || 0 },
-    { name: "Nick", value: summary.Combined?.N || 0 },
-    { name: "Madeline", value: summary.Combined?.M || 0 },
-  ].filter(d => d.value > 0), [summary]);
-
   const hasData = transactions.length > 0;
 
   const TABS = [
@@ -151,6 +139,7 @@ export default function App() {
     ["charts", "Charts"],
     ["grocery", "Grocery vs Dining"],
     ["history", "History"],
+    ["settings", "Settings"],
   ];
 
   return (
@@ -173,7 +162,27 @@ export default function App() {
           </div>
           <div style={{ fontSize: 11, color: "#444", letterSpacing: ".1em", textTransform: "uppercase", marginTop: 2 }}>Chase Sapphire + Capital One</div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <div style={{ display: "flex", background: "#13151c", border: "1px solid #1e2029", borderRadius: 8, overflow: "hidden" }}>
+            {["calendar", "statement"].map(mode => (
+              <button
+                key={mode}
+                onClick={() => handlePeriodMode(mode)}
+                style={{
+                  background: periodMode === mode ? "#1e2029" : "none",
+                  border: "none",
+                  color: periodMode === mode ? "#e8e8e0" : "#444",
+                  fontFamily: "inherit",
+                  fontSize: 11,
+                  padding: "5px 14px",
+                  cursor: "pointer",
+                  letterSpacing: ".06em",
+                  textTransform: "uppercase",
+                  transition: "all .15s",
+                }}
+              >{mode}</button>
+            ))}
+          </div>
           {hasData && <span style={{ fontSize: 12, color: "#555" }}>{transactions.length} transactions</span>}
           {hasData && <button className="clear-btn" onClick={clearAll}>Clear session</button>}
         </div>
@@ -185,7 +194,7 @@ export default function App() {
             key={id}
             className={`tab-btn${tab === id ? " active" : ""}`}
             onClick={() => setTab(id)}
-            disabled={id !== "upload" && id !== "history" && !hasData}
+            disabled={id !== "upload" && id !== "history" && id !== "settings" && !hasData}
           >{label}</button>
         ))}
       </div>
@@ -196,11 +205,12 @@ export default function App() {
         ))}
 
         {tab === "upload" && <Upload transactions={transactions} onFile={handleFile} dragOver={dragOver} setDragOver={setDragOver} />}
-        {tab === "staging" && hasData && <StagingTable transactions={transactions} setOwner={setOwner} />}
-        {tab === "summary" && hasData && <Summary summary={summary} />}
-        {tab === "charts" && hasData && <Charts summary={summary} categoryData={categoryData} ownerPieData={ownerPieData} />}
+        {tab === "staging" && hasData && <StagingTable transactions={transactions} setOwner={setOwner} periodMode={periodMode} statementDates={statementDates} />}
+        {tab === "summary" && hasData && <Summary transactions={transactions} periodMode={periodMode} statementDates={statementDates} />}
+        {tab === "charts" && hasData && <Charts transactions={transactions} periodMode={periodMode} statementDates={statementDates} />}
         {tab === "grocery" && hasData && <GroceryVsDining transactions={transactions} />}
-        {tab === "history" && <HistoryView />}
+        {tab === "history" && <HistoryView periodMode={periodMode} statementDates={statementDates} />}
+        {tab === "settings" && <Settings onSettingsChange={setStatementDates} />}
       </div>
     </div>
   );

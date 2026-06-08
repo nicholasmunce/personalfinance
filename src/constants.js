@@ -1,9 +1,10 @@
-export const OWNERS = ["Joint", "N", "M"];
-export const OWNER_LABELS = { Joint: "Joint", N: "Nick", M: "Madeline" };
+export const OWNERS = ["C", "N", "M", "X"];
+export const OWNER_LABELS = { C: "Checking", N: "Nick", M: "Madeline", X: "Non-Checking" };
 export const COLORS = {
-  Joint: "#4ade80",
+  C: "#4ade80",
   N: "#60a5fa",
   M: "#f472b6",
+  X: "#fb923c",
   Chase: "#f59e0b",
   CapitalOne: "#a78bfa",
 };

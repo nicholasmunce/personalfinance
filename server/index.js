@@ -9,6 +9,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const db = new Database(join(__dirname, "../finance.db"));
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS statement_dates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    card TEXT NOT NULL,
+    close_date TEXT NOT NULL,
+    UNIQUE(card, close_date)
+  );
+
   CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
     date TEXT NOT NULL,
@@ -114,6 +126,34 @@ app.get("/api/analytics/ytd", (req, res) => {
     ORDER BY total DESC
   `).all(year);
   res.json(rows);
+});
+
+// Statement dates
+app.get("/api/statement-dates", (req, res) => {
+  const rows = db.prepare("SELECT * FROM statement_dates ORDER BY card, close_date ASC").all();
+  res.json(rows);
+});
+
+app.post("/api/statement-dates", (req, res) => {
+  const { card, close_date } = req.body;
+  if (!card || !close_date) return res.status(400).json({ error: "card and close_date required" });
+  try {
+    const result = db.prepare("INSERT OR IGNORE INTO statement_dates (card, close_date) VALUES (?, ?)").run(card, close_date);
+    const row = db.prepare("SELECT * FROM statement_dates WHERE card = ? AND close_date = ?").get(card, close_date);
+    res.json(row);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete("/api/statement-dates/:id", (req, res) => {
+  db.prepare("DELETE FROM statement_dates WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
+});
+
+// All raw transactions for client-side grouping (history view)
+app.get("/api/transactions/all", (req, res) => {
+  res.json(db.prepare("SELECT * FROM transactions WHERE type = 'debit' ORDER BY date ASC").all());
 });
 
 // Update custom category
