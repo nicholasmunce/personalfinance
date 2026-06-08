@@ -37,16 +37,18 @@ export function parseChase(text) {
   return lines.slice(1).map((line) => {
     const cols = splitCSV(line);
     const amount = parseFloat(cols[5]) || 0;
+    if (amount === 0) return null;
+    const type = amount < 0 ? "debit" : "payment";
     return {
       date: normalizeDate(cols[0]?.trim()),
       description: cols[2]?.trim(),
-      category: cols[3]?.trim() || "Uncategorized",
+      category: type === "payment" ? "Payment" : (cols[3]?.trim() || "Uncategorized"),
       amount: Math.abs(amount),
-      type: amount < 0 ? "debit" : "credit",
+      type,
       card: "Chase Sapphire",
       owner: "C",
     };
-  }).filter(r => r.amount > 0 && r.type === "debit");
+  }).filter(Boolean);
 }
 
 export function parseCapitalOne(text) {
@@ -73,13 +75,16 @@ export function parseCapitalOne(text) {
   return lines.slice(1).map((line) => {
     const cols = splitCSV(line);
     const debit = parseFloat((cols[idx.debit] || "").replace(/[$,]/g, "")) || 0;
-    if (debit === 0) return null;
+    const credit = parseFloat((cols[idx.credit] || "").replace(/[$,]/g, "")) || 0;
+    if (debit === 0 && credit === 0) return null;
+    const type = debit > 0 ? "debit" : "payment";
+    const amount = debit > 0 ? debit : credit;
     return {
       date: normalizeDate(cols[idx.date]?.trim()),
       description: cols[idx.description]?.trim(),
-      category: cols[idx.category]?.trim() || "Uncategorized",
-      amount: debit,
-      type: "debit",
+      category: type === "payment" ? "Payment" : (cols[idx.category]?.trim() || "Uncategorized"),
+      amount,
+      type,
       card: "Capital One",
       owner: "C",
     };
