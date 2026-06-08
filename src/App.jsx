@@ -5,6 +5,8 @@ import StagingTable from './components/StagingTable.jsx';
 import Summary from './components/Summary.jsx';
 import Charts from './components/Charts.jsx';
 import GroceryVsDining from './components/GroceryVsDining.jsx';
+import DuplicateReview from './components/DuplicateReview.jsx';
+import HistoryView from './components/HistoryView.jsx';
 
 const GLOBAL_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:wght@300;600;900&display=swap');
@@ -44,15 +46,37 @@ export default function App() {
   const [tab, setTab] = useState("upload");
   const [dragOver, setDragOver] = useState(null);
   const [errors, setErrors] = useState([]);
+  const [pendingImport, setPendingImport] = useState(null); // { newTxns, dupTxns }
 
-  const ingest = useCallback((text, filename) => {
-    const { parsed } = autoDetectAndParse(text, filename);
+  const ingest = useCallback(async (text, filename) => {
+    const { parsed } = await autoDetectAndParse(text, filename);
     if (!parsed || parsed.length === 0) {
       setErrors(e => [...e, `Could not parse "${filename}". Make sure it's a Chase or Capital One CSV export.`]);
       return;
     }
+
+    // Check which IDs already exist in DB
+    const ids = parsed.map(t => t.id);
+    let existing = [];
+    try {
+      const res = await fetch("/api/transactions/check-duplicates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      const json = await res.json();
+      existing = json.existing;
+    } catch {
+      // Server not reachable — proceed without duplicate check
+    }
+
+    const existingSet = new Set(existing);
+    const newTxns = parsed.filter(t => !existingSet.has(t.id));
+    const dupTxns = parsed.filter(t => existingSet.has(t.id));
+
     setTransactions(prev => [...prev, ...parsed]);
     setTab("staging");
+    setPendingImport({ newTxns, dupTxns });
   }, []);
 
   const handleFile = useCallback((file) => {
@@ -66,7 +90,21 @@ export default function App() {
     setTransactions(prev => prev.map((t, i) => i === idx ? { ...t, owner } : t));
   };
 
-  const clearAll = () => { setTransactions([]); setTab("upload"); setErrors([]); };
+  const clearAll = () => { setTransactions([]); setTab("upload"); setErrors([]); setPendingImport(null); };
+
+  async function commitImport(newTxns) {
+    // Use the current owner assignments from staging
+    const ownerMap = {};
+    transactions.forEach(t => { ownerMap[t.id] = t.owner; });
+    const withOwners = newTxns.map(t => ({ ...t, owner: ownerMap[t.id] || t.owner }));
+
+    await fetch("/api/transactions/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transactions: withOwners }),
+    });
+    setPendingImport(null);
+  }
 
   const summary = useMemo(() => {
     const cards = ["Chase Sapphire", "Capital One"];
@@ -106,9 +144,27 @@ export default function App() {
 
   const hasData = transactions.length > 0;
 
+  const TABS = [
+    ["upload", "Upload"],
+    ["staging", "Staging"],
+    ["summary", "Summary"],
+    ["charts", "Charts"],
+    ["grocery", "Grocery vs Dining"],
+    ["history", "History"],
+  ];
+
   return (
     <div style={{ minHeight: "100vh", background: "#0d0f14", color: "#e8e8e0", fontFamily: "'DM Mono', 'Courier New', monospace" }}>
       <style>{GLOBAL_STYLES}</style>
+
+      {pendingImport && (
+        <DuplicateReview
+          newTxns={pendingImport.newTxns}
+          dupTxns={pendingImport.dupTxns}
+          onConfirm={commitImport}
+          onCancel={() => setPendingImport(null)}
+        />
+      )}
 
       <div style={{ borderBottom: "1px solid #1a1c23", padding: "20px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
@@ -119,17 +175,17 @@ export default function App() {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {hasData && <span style={{ fontSize: 12, color: "#555" }}>{transactions.length} transactions</span>}
-          {hasData && <button className="clear-btn" onClick={clearAll}>Clear all</button>}
+          {hasData && <button className="clear-btn" onClick={clearAll}>Clear session</button>}
         </div>
       </div>
 
       <div style={{ borderBottom: "1px solid #1a1c23", padding: "0 32px", display: "flex", gap: 4 }}>
-        {[["upload","Upload"], ["staging","Staging"], ["summary","Summary"], ["charts","Charts"], ["grocery","Grocery vs Dining"]].map(([id, label]) => (
+        {TABS.map(([id, label]) => (
           <button
             key={id}
             className={`tab-btn${tab === id ? " active" : ""}`}
             onClick={() => setTab(id)}
-            disabled={id !== "upload" && !hasData}
+            disabled={id !== "upload" && id !== "history" && !hasData}
           >{label}</button>
         ))}
       </div>
@@ -144,6 +200,7 @@ export default function App() {
         {tab === "summary" && hasData && <Summary summary={summary} />}
         {tab === "charts" && hasData && <Charts summary={summary} categoryData={categoryData} ownerPieData={ownerPieData} />}
         {tab === "grocery" && hasData && <GroceryVsDining transactions={transactions} />}
+        {tab === "history" && <HistoryView />}
       </div>
     </div>
   );

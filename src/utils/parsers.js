@@ -1,3 +1,14 @@
+// Deterministic ID so the same transaction never duplicates across imports
+async function digestId(tx) {
+  const raw = `${tx.date}|${tx.description}|${tx.amount}|${tx.card}`;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+}
+
+async function attachIds(rows) {
+  return Promise.all(rows.map(async (r) => ({ ...r, id: await digestId(r) })));
+}
+
 function splitCSV(line) {
   const result = [];
   let cur = "", inQ = false;
@@ -67,23 +78,24 @@ export function parseCapitalOne(text) {
   }).filter(Boolean);
 }
 
-export function autoDetectAndParse(text, filename) {
+export async function autoDetectAndParse(text, filename) {
   const lower = filename.toLowerCase();
 
+  let raw = null, card = null;
   if (lower.includes("chase")) {
-    return { parsed: parseChase(text), card: "Chase Sapphire" };
+    raw = parseChase(text); card = "Chase Sapphire";
+  } else if (lower.includes("capital") || lower.includes("cap1") || lower.includes("capitalone")) {
+    raw = parseCapitalOne(text); card = "Capital One";
+  } else {
+    const tryChase = parseChase(text) || [];
+    const tryCap = parseCapitalOne(text) || [];
+    if (tryCap.length >= tryChase.length && tryCap.length > 0) {
+      raw = tryCap; card = "Capital One";
+    } else if (tryChase.length > 0) {
+      raw = tryChase; card = "Chase Sapphire";
+    }
   }
-  if (lower.includes("capital") || lower.includes("cap1") || lower.includes("capitalone")) {
-    return { parsed: parseCapitalOne(text), card: "Capital One" };
-  }
-
-  const tryChase = parseChase(text) || [];
-  const tryCap = parseCapitalOne(text) || [];
-  if (tryCap.length >= tryChase.length && tryCap.length > 0) {
-    return { parsed: tryCap, card: "Capital One" };
-  }
-  if (tryChase.length > 0) {
-    return { parsed: tryChase, card: "Chase Sapphire" };
-  }
-  return { parsed: null, card: null };
+  if (!raw) return { parsed: null, card: null };
+  const parsed = await attachIds(raw);
+  return { parsed, card };
 }
