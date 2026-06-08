@@ -36,6 +36,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_date ON transactions(date);
 `);
 
+// Migrate any MM/DD/YYYY dates to YYYY-MM-DD
+const badDates = db.prepare("SELECT id, date FROM transactions WHERE date LIKE '__/__/____'").all();
+if (badDates.length > 0) {
+  const fix = db.prepare("UPDATE transactions SET date = ? WHERE id = ?");
+  const migrate = db.transaction(() => {
+    for (const row of badDates) {
+      const [m, d, y] = row.date.split("/");
+      fix.run(`${y}-${m.padStart(2,"0")}-${d.padStart(2,"0")}`, row.id);
+    }
+  });
+  migrate();
+  console.log(`Migrated ${badDates.length} dates to ISO format`);
+}
+
 export function makeId(tx) {
   return createHash("sha256")
     .update(`${tx.date}|${tx.description}|${tx.amount}|${tx.card}`)
@@ -149,6 +163,18 @@ app.post("/api/statement-dates", (req, res) => {
 app.delete("/api/statement-dates/:id", (req, res) => {
   db.prepare("DELETE FROM statement_dates WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
+});
+
+// Available calendar months in the DB
+app.get("/api/transactions/months", (req, res) => {
+  const rows = db.prepare(`
+    SELECT strftime('%Y-%m', date) AS month, COUNT(*) AS count
+    FROM transactions
+    WHERE type = 'debit'
+    GROUP BY month
+    ORDER BY month DESC
+  `).all();
+  res.json(rows);
 });
 
 // All raw transactions for client-side grouping (history view)

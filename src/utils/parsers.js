@@ -9,6 +9,14 @@ async function attachIds(rows) {
   return Promise.all(rows.map(async (r) => ({ ...r, id: await digestId(r) })));
 }
 
+// Normalize MM/DD/YYYY → YYYY-MM-DD; pass through anything already ISO
+function normalizeDate(str) {
+  if (!str) return str;
+  const m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[1].padStart(2, "0")}-${m[2].padStart(2, "0")}`;
+  return str;
+}
+
 function splitCSV(line) {
   const result = [];
   let cur = "", inQ = false;
@@ -30,7 +38,7 @@ export function parseChase(text) {
     const cols = splitCSV(line);
     const amount = parseFloat(cols[5]) || 0;
     return {
-      date: cols[0]?.trim(),
+      date: normalizeDate(cols[0]?.trim()),
       description: cols[2]?.trim(),
       category: cols[3]?.trim() || "Uncategorized",
       amount: Math.abs(amount),
@@ -67,7 +75,7 @@ export function parseCapitalOne(text) {
     const debit = parseFloat((cols[idx.debit] || "").replace(/[$,]/g, "")) || 0;
     if (debit === 0) return null;
     return {
-      date: cols[idx.date]?.trim(),
+      date: normalizeDate(cols[idx.date]?.trim()),
       description: cols[idx.description]?.trim(),
       category: cols[idx.category]?.trim() || "Uncategorized",
       amount: debit,

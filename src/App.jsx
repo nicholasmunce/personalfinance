@@ -116,6 +116,14 @@ export default function App() {
 
   const clearAll = () => { setTransactions([]); setTab("upload"); setErrors([]); setPendingImport(null); };
 
+  async function loadFromDb(from, to) {
+    const params = new URLSearchParams({ from, to });
+    const rows = await fetch(`/api/transactions?${params}`).then(r => r.json());
+    if (!rows.length) return;
+    setTransactions(rows);
+    setTab("staging");
+  }
+
   async function commitImport(newTxns) {
     // Use the current owner assignments from staging
     const ownerMap = {};
@@ -204,7 +212,7 @@ export default function App() {
           <div key={i} className="error-bar">⚠ {e} <span style={{ cursor: "pointer", float: "right" }} onClick={() => setErrors(prev => prev.filter((_, j) => j !== i))}>✕</span></div>
         ))}
 
-        {tab === "upload" && <Upload transactions={transactions} onFile={handleFile} dragOver={dragOver} setDragOver={setDragOver} />}
+        {tab === "upload" && <Upload transactions={transactions} onFile={handleFile} dragOver={dragOver} setDragOver={setDragOver} periodMode={periodMode} statementDates={statementDates} onLoadFromDb={loadFromDb} />}
         {tab === "staging" && hasData && <StagingTable transactions={transactions} setOwner={setOwner} periodMode={periodMode} statementDates={statementDates} />}
         {tab === "summary" && hasData && <Summary transactions={transactions} periodMode={periodMode} statementDates={statementDates} />}
         {tab === "charts" && hasData && <Charts transactions={transactions} periodMode={periodMode} statementDates={statementDates} />}
