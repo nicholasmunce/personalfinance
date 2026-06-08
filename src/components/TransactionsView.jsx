@@ -68,6 +68,7 @@ export default function TransactionsView({ transactions, onOwnerChange, onDelete
   const [confirmDelete, setConfirmDelete] = useState(null);
 
   const filtered = useMemo(() => transactions.filter(t => {
+    if (t.type === "payment") return false;
     if (cardFilter !== "All" && t.card !== cardFilter) return false;
     if (ownerFilter !== "All" && t.owner !== ownerFilter) return false;
     if (search) {
