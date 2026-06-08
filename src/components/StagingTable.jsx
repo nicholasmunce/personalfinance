@@ -1,18 +1,37 @@
 import React, { useState, useMemo } from 'react';
 import { OWNERS } from '../constants.js';
 import { fmt } from '../utils/format.js';
+import { getPeriodForDate, formatPeriod } from '../utils/statementPeriod.js';
 
-export default function StagingTable({ transactions, setOwner }) {
+export default function StagingTable({ transactions, setOwner, periodMode, statementDates }) {
   const [cardFilter, setCardFilter] = useState("All");
   const [ownerFilter, setOwnerFilter] = useState("All");
+  const [periodFilter, setPeriodFilter] = useState("all");
   const [search, setSearch] = useState("");
+
+  // Build available statement periods from transactions
+  const statementPeriods = useMemo(() => {
+    if (periodMode !== "statement") return [];
+    const seen = new Map();
+    transactions.forEach(tx => {
+      const dates = statementDates?.[tx.card] || [];
+      const p = getPeriodForDate(tx.date, dates);
+      if (p && !seen.has(p.sortKey)) seen.set(p.sortKey, p);
+    });
+    return [...seen.values()].sort((a, b) => b.sortKey.localeCompare(a.sortKey));
+  }, [transactions, periodMode, statementDates]);
 
   const filtered = useMemo(() => transactions.map((t, i) => ({ ...t, _idx: i })).filter(t => {
     if (cardFilter !== "All" && t.card !== cardFilter) return false;
     if (ownerFilter !== "All" && t.owner !== ownerFilter) return false;
     if (search && !t.description.toLowerCase().includes(search.toLowerCase()) && !t.category.toLowerCase().includes(search.toLowerCase())) return false;
+    if (periodMode === "statement" && periodFilter !== "all") {
+      const dates = statementDates?.[t.card] || [];
+      const p = getPeriodForDate(t.date, dates);
+      if (!p || p.sortKey !== periodFilter) return false;
+    }
     return true;
-  }), [transactions, cardFilter, ownerFilter, search]);
+  }), [transactions, cardFilter, ownerFilter, search, periodMode, periodFilter, statementDates]);
 
   const bulkTag = (owner) => filtered.forEach(t => setOwner(t._idx, owner));
 
@@ -31,14 +50,28 @@ export default function StagingTable({ transactions, setOwner }) {
           ))}
         </div>
         <div style={{ display: "flex", gap: 4 }}>
-          {["All", "Joint", "N", "M"].map(f => (
-            <button key={f} className={`filter-btn${ownerFilter === f ? " active" : ""}`} onClick={() => setOwnerFilter(f)}>{f === "All" ? "All owners" : f === "N" ? "Nick" : f === "M" ? "Madeline" : "Joint"}</button>
+          {["All", "C", "N", "M", "X"].map(f => (
+            <button key={f} className={`filter-btn${ownerFilter === f ? " active" : ""}`} onClick={() => setOwnerFilter(f)}>
+              {f === "All" ? "All owners" : f === "C" ? "Checking" : f === "N" ? "Nick" : f === "M" ? "Madeline" : "Non-Checking"}
+            </button>
           ))}
         </div>
+        {periodMode === "statement" && statementPeriods.length > 0 && (
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            <button key="all" className={`filter-btn${periodFilter === "all" ? " active" : ""}`} onClick={() => setPeriodFilter("all")}>All periods</button>
+            {statementPeriods.map(p => (
+              <button key={p.sortKey} className={`filter-btn${periodFilter === p.sortKey ? " active" : ""}`} onClick={() => setPeriodFilter(p.sortKey)}>
+                {formatPeriod(p.start, p.end)}
+              </button>
+            ))}
+          </div>
+        )}
         <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
           <span style={{ fontSize: 11, color: "#444" }}>Bulk tag filtered:</span>
           {OWNERS.map(o => (
-            <button key={o} className={`owner-btn active-${o}`} onClick={() => bulkTag(o)}>{o === "N" ? "Nick" : o === "M" ? "Madeline" : "Joint"}</button>
+            <button key={o} className={`owner-btn active-${o}`} onClick={() => bulkTag(o)}>
+              {o === "C" ? "Checking" : o === "N" ? "Nick" : o === "M" ? "Madeline" : "Non-Checking"}
+            </button>
           ))}
         </div>
       </div>
@@ -58,7 +91,7 @@ export default function StagingTable({ transactions, setOwner }) {
               <div style={{ padding: "8px 14px", borderBottom: "1px solid #141618", display: "flex", gap: 6, alignItems: "center", flexWrap: "nowrap" }}>
                 {OWNERS.map(o => {
                   const isActive = t.owner === o;
-                  const colors = { Joint: "#4ade80", N: "#60a5fa", M: "#f472b6" };
+                  const colors = { C: "#4ade80", N: "#60a5fa", M: "#f472b6", X: "#fb923c" };
                   const color = colors[o];
                   return (
                     <button
@@ -79,7 +112,7 @@ export default function StagingTable({ transactions, setOwner }) {
                         fontWeight: isActive ? 600 : 400,
                       }}
                     >
-                      {o === "N" ? "Nick" : o === "M" ? "Mad" : "Joint"}
+                      {o === "C" ? "Chk" : o === "N" ? "Nick" : o === "M" ? "Mad" : "Non-Chk"}
                     </button>
                   );
                 })}
