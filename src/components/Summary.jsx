@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import { fmt } from '../utils/format.js';
-import { getPeriodForDate, formatPeriod } from '../utils/statementPeriod.js';
 
 const CARDS = ["Chase Sapphire", "Capital One"];
 
@@ -24,48 +23,15 @@ function buildSummary(transactions) {
   return result;
 }
 
-function getCurrentPeriod(card, statementDates) {
-  const dates = statementDates[card] || [];
-  const today = new Date().toISOString().slice(0, 10);
-  return getPeriodForDate(today, dates);
-}
-
-export default function Summary({ transactions, periodMode, statementDates }) {
-  const { filteredTxns, periodLabel } = useMemo(() => {
-    if (periodMode === "calendar") {
-      return { filteredTxns: transactions, periodLabel: null };
-    }
-    const today = new Date().toISOString().slice(0, 10);
-    const filtered = transactions.filter(tx => {
-      const dates = statementDates[tx.card] || [];
-      const period = getPeriodForDate(today, dates);
-      if (!period) return false;
-      const start = period.start || "0000-00-00";
-      const end = period.end || "9999-99-99";
-      return tx.date >= start && tx.date <= end;
-    });
-    const chasePeriod = getCurrentPeriod("Chase Sapphire", statementDates);
-    const label = chasePeriod ? `Current statement: ${chasePeriod.label}` : "Current statement";
-    return { filteredTxns: filtered, periodLabel: label };
-  }, [transactions, periodMode, statementDates]);
-
-  const summary = useMemo(() => buildSummary(filteredTxns), [filteredTxns]);
+export default function Summary({ transactions }) {
+  const summary = useMemo(() => buildSummary(transactions), [transactions]);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-      {periodLabel && (
-        <div style={{ gridColumn: "1/-1", fontSize: 12, color: "#4ade80", letterSpacing: ".06em", marginBottom: 4 }}>
-          {periodLabel}
-        </div>
-      )}
       {[...CARDS, "Combined"].map(card => {
         const d = summary[card] || {};
         const total = (d.C || 0) + (d.N || 0) + (d.M || 0) + (d.X || 0);
         const isCombo = card === "Combined";
-
-        const periodInfo = periodMode === "statement" && card !== "Combined"
-          ? getCurrentPeriod(card, statementDates)
-          : null;
 
         return (
           <div key={card} className="card-block" style={isCombo ? { gridColumn: "1/-1", borderColor: "#2a2d36" } : {}}>
@@ -73,9 +39,6 @@ export default function Summary({ transactions, periodMode, statementDates }) {
               <div>
                 <div style={{ fontFamily: "'Fraunces', serif", fontSize: isCombo ? 20 : 17, fontWeight: 600, color: "#fff" }}>{card}</div>
                 {isCombo && <div style={{ fontSize: 11, color: "#444", marginTop: 2, letterSpacing: ".06em", textTransform: "uppercase" }}>All cards combined</div>}
-                {periodInfo && (
-                  <div style={{ fontSize: 11, color: "#555", marginTop: 3 }}>{periodInfo.label}</div>
-                )}
               </div>
               <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 900, color: "#4ade80" }}>{fmt(total)}</div>
             </div>
