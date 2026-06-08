@@ -5,6 +5,62 @@ import { fmt } from '../utils/format.js';
 const OWNER_LABELS = { C: "Checking", N: "Nick", M: "Madeline", X: "Non-Chk" };
 const OWNER_COLORS = { C: "#4ade80", N: "#60a5fa", M: "#f472b6", X: "#fb923c" };
 
+const CARDS = ["Chase Sapphire", "Capital One"];
+
+function StatsGrid({ transactions }) {
+  const debits = transactions.filter(t => t.type !== "payment");
+  const stats = useMemo(() => {
+    const grid = {};
+    for (const card of CARDS) {
+      grid[card] = {};
+      for (const o of ["C", "N", "M", "X"]) {
+        grid[card][o] = debits.filter(t => t.card === card && t.owner === o).reduce((s, t) => s + t.amount, 0);
+      }
+      grid[card].total = Object.values(grid[card]).reduce((s, v) => s + v, 0);
+    }
+    grid.Total = {};
+    for (const o of ["C", "N", "M", "X"]) {
+      grid.Total[o] = CARDS.reduce((s, c) => s + (grid[c][o] || 0), 0);
+    }
+    grid.Total.total = CARDS.reduce((s, c) => s + (grid[c].total || 0), 0);
+    return grid;
+  }, [debits]);
+
+  const cols = ["C", "N", "M", "X", "total"];
+  const colLabels = { C: "Checking", N: "Nick", M: "Madeline", X: "Non-Chk", total: "Total" };
+  const colColors = { C: "#4ade80", N: "#60a5fa", M: "#f472b6", X: "#fb923c", total: "#e8e8e0" };
+  const rows = [...CARDS, "Total"];
+
+  const cell = (val, isTotal) => (
+    <div style={{ textAlign: "right", fontSize: isTotal ? 13 : 12, fontWeight: isTotal ? 600 : 400, color: isTotal ? "#e8e8e0" : "#888" }}>
+      {val > 0 ? fmt(val) : <span style={{ color: "#2a2d36" }}>—</span>}
+    </div>
+  );
+
+  return (
+    <div style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 10, padding: "16px 20px", marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: `140px repeat(${cols.length}, 1fr)`, gap: "10px 16px", alignItems: "center" }}>
+        <div />
+        {cols.map(c => (
+          <div key={c} style={{ textAlign: "right", fontSize: 10, color: colColors[c], letterSpacing: ".08em", textTransform: "uppercase", opacity: c === "total" ? 0.5 : 1 }}>{colLabels[c]}</div>
+        ))}
+        {rows.map((row, ri) => (
+          <React.Fragment key={row}>
+            <div style={{ fontSize: 11, color: ri === rows.length - 1 ? "#888" : "#555", letterSpacing: ".04em", borderTop: ri === rows.length - 1 ? "1px solid #1e2029" : "none", paddingTop: ri === rows.length - 1 ? 8 : 0, marginTop: ri === rows.length - 1 ? 2 : 0 }}>
+              {row === "Chase Sapphire" ? "Chase" : row === "Capital One" ? "Cap One" : row}
+            </div>
+            {cols.map(c => (
+              <div key={c} style={{ borderTop: ri === rows.length - 1 ? "1px solid #1e2029" : "none", paddingTop: ri === rows.length - 1 ? 8 : 0, marginTop: ri === rows.length - 1 ? 2 : 0 }}>
+                {cell(stats[row]?.[c] || 0, c === "total" || ri === rows.length - 1)}
+              </div>
+            ))}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function TransactionsView({ transactions, onOwnerChange, onDelete }) {
   const [cardFilter, setCardFilter] = useState("All");
   const [ownerFilter, setOwnerFilter] = useState("All");
@@ -44,6 +100,7 @@ export default function TransactionsView({ transactions, onOwnerChange, onDelete
 
   return (
     <div>
+      <StatsGrid transactions={filtered} />
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <input
           placeholder="Search description or category…"
