@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { fmt } from '../utils/format.js';
 
 const CARDS = ["Chase Sapphire", "Capital One"];
@@ -30,13 +30,43 @@ function buildSummary(transactions) {
 
 export default function Summary({ transactions }) {
   const summary = useMemo(() => buildSummary(transactions), [transactions]);
+  const [balance, setBalance] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/balance").then(r => r.json()).then(setBalance).catch(() => {});
+  }, [transactions]);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+
+      {/* Current balance strip — always reflects latest payment, ignores date range */}
+      {balance && (
+        <div style={{ gridColumn: "1/-1", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 4 }}>
+          {CARDS.map(card => {
+            const b = balance[card];
+            if (!b) return null;
+            return (
+              <div key={card} style={{ background: "#0d0f14", border: "1px solid #1e2029", borderRadius: 10, padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 10, color: "#444", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 4 }}>Current balance</div>
+                  <div style={{ fontSize: 11, color: "#555" }}>{card}</div>
+                  {b.lastPaymentDate
+                    ? <div style={{ fontSize: 10, color: "#333", marginTop: 3 }}>since payment on {b.lastPaymentDate} ({fmt(b.lastPaymentAmount)})</div>
+                    : <div style={{ fontSize: 10, color: "#333", marginTop: 3 }}>no payment on record</div>
+                  }
+                </div>
+                <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 900, color: b.balance > 0 ? "#f87171" : "#4ade80" }}>
+                  {fmt(b.balance)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {[...CARDS, "Combined"].map(card => {
         const d = summary[card] || {};
         const charges = (d.C || 0) + (d.N || 0) + (d.M || 0) + (d.X || 0);
-        const balance = charges - (d.payments || 0);
         const isCombo = card === "Combined";
 
         return (
@@ -46,14 +76,7 @@ export default function Summary({ transactions }) {
                 <div style={{ fontFamily: "'Fraunces', serif", fontSize: isCombo ? 20 : 17, fontWeight: 600, color: "#fff" }}>{card}</div>
                 {isCombo && <div style={{ fontSize: 11, color: "#444", marginTop: 2, letterSpacing: ".06em", textTransform: "uppercase" }}>All cards combined</div>}
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 900, color: "#4ade80" }}>{fmt(charges)}</div>
-                {d.payments > 0 && (
-                  <div style={{ fontSize: 11, color: balance > 0 ? "#f87171" : "#4ade80", marginTop: 3 }}>
-                    {fmt(d.payments)} paid → <span style={{ fontWeight: 600 }}>{fmt(balance)} balance</span>
-                  </div>
-                )}
-              </div>
+              <div style={{ fontFamily: "'Fraunces', serif", fontSize: 22, fontWeight: 900, color: "#4ade80" }}>{fmt(charges)}</div>
             </div>
 
             <div className="summary-row">
@@ -86,13 +109,11 @@ export default function Summary({ transactions }) {
             </div>
 
             {d.payments > 0 && (
-              <div className="summary-row" style={{ opacity: 0.7 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 12, color: "#555" }}>
-                    {d.paymentCount} payment{d.paymentCount !== 1 ? "s" : ""}
-                  </span>
-                </div>
-                <span style={{ fontWeight: 500, color: "#555" }}>−{fmt(d.payments || 0)}</span>
+              <div className="summary-row" style={{ opacity: 0.6 }}>
+                <span style={{ fontSize: 12, color: "#555" }}>
+                  {d.paymentCount} payment{d.paymentCount !== 1 ? "s" : ""} in range
+                </span>
+                <span style={{ fontWeight: 500, color: "#555" }}>−{fmt(d.payments)}</span>
               </div>
             )}
 

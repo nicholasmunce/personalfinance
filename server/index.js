@@ -199,5 +199,37 @@ app.delete("/api/transactions/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+// Current balance per card: charges since last payment
+app.get("/api/balance", (req, res) => {
+  const cards = ["Chase Sapphire", "Capital One"];
+  const result = {};
+  for (const card of cards) {
+    const lastPayment = db.prepare(`
+      SELECT date, amount FROM transactions
+      WHERE card = ? AND type = 'payment'
+      ORDER BY date DESC, created_at DESC
+      LIMIT 1
+    `).get(card);
+
+    if (!lastPayment) {
+      const total = db.prepare(`
+        SELECT SUM(amount) AS total FROM transactions WHERE card = ? AND type = 'debit'
+      `).get(card);
+      result[card] = { balance: total?.total || 0, lastPaymentDate: null, lastPaymentAmount: null };
+    } else {
+      const charges = db.prepare(`
+        SELECT SUM(amount) AS total FROM transactions
+        WHERE card = ? AND type = 'debit' AND date > ?
+      `).get(card, lastPayment.date);
+      result[card] = {
+        balance: charges?.total || 0,
+        lastPaymentDate: lastPayment.date,
+        lastPaymentAmount: lastPayment.amount,
+      };
+    }
+  }
+  res.json(result);
+});
+
 const PORT = 3001;
 app.listen(PORT, () => console.log(`Finance API running on :${PORT}`));
