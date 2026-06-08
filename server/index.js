@@ -184,9 +184,18 @@ app.get("/api/transactions/all", (req, res) => {
 
 // Update custom category
 app.patch("/api/transactions/:id", (req, res) => {
-  const { custom_category } = req.body;
-  db.prepare("UPDATE transactions SET custom_category = ? WHERE id = ?")
-    .run(custom_category, req.params.id);
+  const { custom_category, owner } = req.body;
+  if (custom_category !== undefined) {
+    db.prepare("UPDATE transactions SET custom_category = ? WHERE id = ?").run(custom_category, req.params.id);
+  }
+  if (owner !== undefined) {
+    db.prepare("UPDATE transactions SET owner = ? WHERE id = ?").run(owner, req.params.id);
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/transactions/:id", (req, res) => {
+  db.prepare("DELETE FROM transactions WHERE id = ?").run(req.params.id);
   res.json({ ok: true });
 });
 

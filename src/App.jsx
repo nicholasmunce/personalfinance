@@ -2,11 +2,9 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { autoDetectAndParse } from './utils/parsers.js';
 import Upload from './components/Upload.jsx';
 import StagingTable from './components/StagingTable.jsx';
-import Summary from './components/Summary.jsx';
-import Charts from './components/Charts.jsx';
-import GroceryVsDining from './components/GroceryVsDining.jsx';
+import AnalyticsView from './components/AnalyticsView.jsx';
+import TransactionsView from './components/TransactionsView.jsx';
 import DuplicateReview from './components/DuplicateReview.jsx';
-import HistoryView from './components/HistoryView.jsx';
 import Settings from './components/Settings.jsx';
 
 const GLOBAL_STYLES = `
@@ -42,14 +40,30 @@ const GLOBAL_STYLES = `
   .filter-btn { background: none; border: 1px solid #2a2d36; color: #888; border-radius: 6px; padding: 4px 12px; font-family: inherit; font-size: 11px; cursor: pointer; letter-spacing:.05em; transition: all .15s; }
   .filter-btn:hover { border-color: #555; color: #ddd; }
   .filter-btn.active { border-color: #4ade80; color: #4ade80; background: rgba(74,222,128,.08); }
+  input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.4); cursor: pointer; }
 `;
 
+function defaultDateRange() {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+  const to = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: to.toISOString().slice(0, 10),
+  };
+}
+
 export default function App() {
+  const defaults = defaultDateRange();
+  const [tab, setTab] = useState("analytics");
+  const [dateFrom, setDateFrom] = useState(defaults.from);
+  const [dateTo, setDateTo] = useState(defaults.to);
   const [transactions, setTransactions] = useState([]);
-  const [tab, setTab] = useState("upload");
+  const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(null);
   const [errors, setErrors] = useState([]);
-  const [pendingImport, setPendingImport] = useState(null); // { newTxns, dupTxns }
+  const [pendingImport, setPendingImport] = useState(null);
+  const [stagingTxns, setStagingTxns] = useState([]);
   const [periodMode, setPeriodMode] = useState(() => localStorage.getItem("periodMode") || "calendar");
   const [statementDates, setStatementDates] = useState({});
 
@@ -67,6 +81,19 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (tab === "import") return;
+    loadRange(dateFrom, dateTo);
+  }, [dateFrom, dateTo]);
+
+  async function loadRange(from, to) {
+    setLoading(true);
+    const params = new URLSearchParams({ from, to });
+    const rows = await fetch(`/api/transactions?${params}`).then(r => r.json()).catch(() => []);
+    setTransactions(rows);
+    setLoading(false);
+  }
+
   function handlePeriodMode(mode) {
     setPeriodMode(mode);
     localStorage.setItem("periodMode", mode);
@@ -78,8 +105,6 @@ export default function App() {
       setErrors(e => [...e, `Could not parse "${filename}". Make sure it's a Chase or Capital One CSV export.`]);
       return;
     }
-
-    // Check which IDs already exist in DB
     const ids = parsed.map(t => t.id);
     let existing = [];
     try {
@@ -88,18 +113,14 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids }),
       });
-      const json = await res.json();
-      existing = json.existing;
-    } catch {
-      // Server not reachable — proceed without duplicate check
-    }
+      existing = (await res.json()).existing;
+    } catch {}
 
     const existingSet = new Set(existing);
     const newTxns = parsed.filter(t => !existingSet.has(t.id));
     const dupTxns = parsed.filter(t => existingSet.has(t.id));
 
-    setTransactions(prev => [...prev, ...parsed]);
-    setTab("staging");
+    setStagingTxns(parsed);
     setPendingImport({ newTxns, dupTxns });
   }, []);
 
@@ -110,45 +131,41 @@ export default function App() {
     reader.readAsText(file);
   }, [ingest]);
 
-  const setOwner = (idx, owner) => {
-    setTransactions(prev => prev.map((t, i) => i === idx ? { ...t, owner } : t));
+  const setStagingOwner = (idx, owner) => {
+    setStagingTxns(prev => prev.map((t, i) => i === idx ? { ...t, owner } : t));
   };
 
-  const clearAll = () => { setTransactions([]); setTab("upload"); setErrors([]); setPendingImport(null); };
-
-  async function loadFromDb(from, to) {
-    const params = new URLSearchParams({ from, to });
-    const rows = await fetch(`/api/transactions?${params}`).then(r => r.json());
-    if (!rows.length) return;
-    setTransactions(rows);
-    setTab("staging");
-  }
-
   async function commitImport(newTxns) {
-    // Use the current owner assignments from staging
     const ownerMap = {};
-    transactions.forEach(t => { ownerMap[t.id] = t.owner; });
+    stagingTxns.forEach(t => { ownerMap[t.id] = t.owner; });
     const withOwners = newTxns.map(t => ({ ...t, owner: ownerMap[t.id] || t.owner }));
-
     await fetch("/api/transactions/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ transactions: withOwners }),
     });
     setPendingImport(null);
+    setStagingTxns([]);
+    await loadRange(dateFrom, dateTo);
+    setTab("analytics");
   }
 
-  const hasData = transactions.length > 0;
+  function handleOwnerChange(id, owner) {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, owner } : t));
+  }
+
+  function handleDelete(id) {
+    setTransactions(prev => prev.filter(t => t.id !== id));
+  }
 
   const TABS = [
-    ["upload", "Upload"],
-    ["staging", "Staging"],
-    ["summary", "Summary"],
-    ["charts", "Charts"],
-    ["grocery", "Grocery vs Dining"],
-    ["history", "History"],
+    ["analytics", "Analytics"],
+    ["transactions", "Transactions"],
+    ["import", "Import"],
     ["settings", "Settings"],
   ];
+
+  const showStaging = stagingTxns.length > 0 && !pendingImport;
 
   return (
     <div style={{ minHeight: "100vh", background: "#0d0f14", color: "#e8e8e0", fontFamily: "'DM Mono', 'Courier New', monospace" }}>
@@ -159,10 +176,11 @@ export default function App() {
           newTxns={pendingImport.newTxns}
           dupTxns={pendingImport.dupTxns}
           onConfirm={commitImport}
-          onCancel={() => setPendingImport(null)}
+          onCancel={() => { setPendingImport(null); setStagingTxns([]); }}
         />
       )}
 
+      {/* Header */}
       <div style={{ borderBottom: "1px solid #1a1c23", padding: "20px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontFamily: "'Fraunces', serif", fontSize: 26, fontWeight: 900, letterSpacing: "-.02em", color: "#fff" }}>
@@ -171,53 +189,102 @@ export default function App() {
           <div style={{ fontSize: 11, color: "#444", letterSpacing: ".1em", textTransform: "uppercase", marginTop: 2 }}>Chase Sapphire + Capital One</div>
         </div>
         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          {/* Period mode toggle */}
           <div style={{ display: "flex", background: "#13151c", border: "1px solid #1e2029", borderRadius: 8, overflow: "hidden" }}>
             {["calendar", "statement"].map(mode => (
-              <button
-                key={mode}
-                onClick={() => handlePeriodMode(mode)}
-                style={{
-                  background: periodMode === mode ? "#1e2029" : "none",
-                  border: "none",
-                  color: periodMode === mode ? "#e8e8e0" : "#444",
-                  fontFamily: "inherit",
-                  fontSize: 11,
-                  padding: "5px 14px",
-                  cursor: "pointer",
-                  letterSpacing: ".06em",
-                  textTransform: "uppercase",
-                  transition: "all .15s",
-                }}
-              >{mode}</button>
+              <button key={mode} onClick={() => handlePeriodMode(mode)} style={{
+                background: periodMode === mode ? "#1e2029" : "none",
+                border: "none", color: periodMode === mode ? "#e8e8e0" : "#444",
+                fontFamily: "inherit", fontSize: 11, padding: "5px 14px", cursor: "pointer",
+                letterSpacing: ".06em", textTransform: "uppercase", transition: "all .15s",
+              }}>{mode}</button>
             ))}
           </div>
-          {hasData && <span style={{ fontSize: 12, color: "#555" }}>{transactions.length} transactions</span>}
-          {hasData && <button className="clear-btn" onClick={clearAll}>Clear session</button>}
+          {/* Global date range */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+              style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 6, padding: "5px 10px", color: "#888", fontFamily: "inherit", fontSize: 11 }}
+            />
+            <span style={{ color: "#333", fontSize: 11 }}>→</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+              style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 6, padding: "5px 10px", color: "#888", fontFamily: "inherit", fontSize: 11 }}
+            />
+          </div>
+          {loading && <span style={{ fontSize: 11, color: "#444" }}>Loading…</span>}
+          {!loading && transactions.length > 0 && (
+            <span style={{ fontSize: 12, color: "#555" }}>{transactions.length} transactions</span>
+          )}
         </div>
       </div>
 
+      {/* Tab bar */}
       <div style={{ borderBottom: "1px solid #1a1c23", padding: "0 32px", display: "flex", gap: 4 }}>
         {TABS.map(([id, label]) => (
-          <button
-            key={id}
-            className={`tab-btn${tab === id ? " active" : ""}`}
-            onClick={() => setTab(id)}
-            disabled={id !== "upload" && id !== "history" && id !== "settings" && !hasData}
-          >{label}</button>
+          <button key={id} className={`tab-btn${tab === id ? " active" : ""}`} onClick={() => setTab(id)}>
+            {label}
+          </button>
         ))}
       </div>
 
       <div style={{ padding: "32px", maxWidth: 1100, margin: "0 auto" }}>
         {errors.map((e, i) => (
-          <div key={i} className="error-bar">⚠ {e} <span style={{ cursor: "pointer", float: "right" }} onClick={() => setErrors(prev => prev.filter((_, j) => j !== i))}>✕</span></div>
+          <div key={i} className="error-bar">
+            ⚠ {e}
+            <span style={{ cursor: "pointer", float: "right" }} onClick={() => setErrors(prev => prev.filter((_, j) => j !== i))}>✕</span>
+          </div>
         ))}
 
-        {tab === "upload" && <Upload transactions={transactions} onFile={handleFile} dragOver={dragOver} setDragOver={setDragOver} periodMode={periodMode} statementDates={statementDates} onLoadFromDb={loadFromDb} />}
-        {tab === "staging" && hasData && <StagingTable transactions={transactions} setOwner={setOwner} periodMode={periodMode} statementDates={statementDates} />}
-        {tab === "summary" && hasData && <Summary transactions={transactions} periodMode={periodMode} statementDates={statementDates} />}
-        {tab === "charts" && hasData && <Charts transactions={transactions} periodMode={periodMode} statementDates={statementDates} />}
-        {tab === "grocery" && hasData && <GroceryVsDining transactions={transactions} />}
-        {tab === "history" && <HistoryView periodMode={periodMode} statementDates={statementDates} />}
+        {tab === "analytics" && (
+          <AnalyticsView transactions={transactions} periodMode={periodMode} statementDates={statementDates} />
+        )}
+
+        {tab === "transactions" && (
+          <TransactionsView
+            transactions={transactions}
+            onOwnerChange={handleOwnerChange}
+            onDelete={handleDelete}
+          />
+        )}
+
+        {tab === "import" && (
+          <div>
+            {showStaging ? (
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                  <div style={{ fontSize: 13, color: "#555" }}>Review & tag before committing to DB</div>
+                  <button className="clear-btn" onClick={() => setStagingTxns([])}>Cancel import</button>
+                </div>
+                <StagingTable
+                  transactions={stagingTxns}
+                  setOwner={setStagingOwner}
+                  periodMode={periodMode}
+                  statementDates={statementDates}
+                />
+                <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
+                  <button
+                    onClick={async () => {
+                      await fetch("/api/transactions/import", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ transactions: stagingTxns }),
+                      });
+                      setStagingTxns([]);
+                      await loadRange(dateFrom, dateTo);
+                      setTab("analytics");
+                    }}
+                    style={{ background: "#4ade80", border: "none", borderRadius: 8, padding: "10px 24px", color: "#0d0f14", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    Commit {stagingTxns.length} transactions
+                  </button>
+                  <button className="clear-btn" onClick={() => setStagingTxns([])}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <Upload onFile={handleFile} dragOver={dragOver} setDragOver={setDragOver} />
+            )}
+          </div>
+        )}
+
         {tab === "settings" && <Settings onSettingsChange={setStatementDates} />}
       </div>
     </div>

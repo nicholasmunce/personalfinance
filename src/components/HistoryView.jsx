@@ -1,25 +1,14 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   LineChart, Line, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ResponsiveContainer
 } from "recharts";
 import { fmt } from "../utils/format.js";
-import { getPeriodForDate, formatPeriod } from "../utils/statementPeriod.js";
+import { getPeriodForDate } from "../utils/statementPeriod.js";
 
 const COLORS = ["#4ade80","#60a5fa","#f472b6","#fbbf24","#a78bfa","#34d399","#fb923c","#e879f9","#38bdf8","#f87171","#94a3b8","#84cc16"];
 
-function useFetch(url) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    setLoading(true);
-    fetch(url).then(r => r.json()).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
-  }, [url]);
-  return { data, loading };
-}
-
-// Group raw transactions into period→category→total rows
-function groupTransactions(transactions, periodMode, statementDates) {
+function groupByPeriod(transactions, periodMode, statementDates) {
   const rows = [];
   for (const tx of transactions) {
     let period;
@@ -52,30 +41,16 @@ function buildChartData(rows) {
   return { periods, categories, chartData };
 }
 
-// ─── Monthly / Statement trends ───────────────────────────────────────────────
-function TrendsChart({ periodMode, statementDates }) {
-  const { data: rawData, loading: rawLoading } = useFetch("/api/transactions/all");
-  const { data: calData, loading: calLoading } = useFetch("/api/analytics/monthly");
-
-  const loading = periodMode === "statement" ? rawLoading : calLoading;
-
+function TrendsChart({ transactions, periodMode, statementDates }) {
   const { categories, chartData } = useMemo(() => {
-    if (periodMode === "statement") {
-      if (!rawData) return { categories: [], chartData: [] };
-      const rows = groupTransactions(rawData, "statement", statementDates);
-      return buildChartData(rows);
-    } else {
-      if (!calData) return { categories: [], chartData: [] };
-      const rows = calData.map(r => ({ period: { id: r.month, label: r.month }, cat: r.cat, total: r.total }));
-      return buildChartData(rows);
-    }
-  }, [rawData, calData, periodMode, statementDates]);
+    const rows = groupByPeriod(transactions, periodMode, statementDates);
+    return buildChartData(rows);
+  }, [transactions, periodMode, statementDates]);
 
   const [visibleCats, setVisibleCats] = useState(null);
   const shown = visibleCats || categories.slice(0, 8);
 
-  if (loading) return <Loader />;
-  if (chartData.length === 0) return <Empty />;
+  if (!chartData.length) return <Empty />;
 
   return (
     <div>
@@ -107,23 +82,9 @@ function TrendsChart({ periodMode, statementDates }) {
   );
 }
 
-// ─── Rolling 3-period averages ────────────────────────────────────────────────
-function RollingAverages({ periodMode, statementDates }) {
-  const { data: rawData, loading: rawLoading } = useFetch("/api/transactions/all");
-  const { data: calData, loading: calLoading } = useFetch("/api/analytics/monthly");
-
-  const loading = periodMode === "statement" ? rawLoading : calLoading;
-
+function RollingAverages({ transactions, periodMode, statementDates }) {
   const { chartData, topCats } = useMemo(() => {
-    let rows;
-    if (periodMode === "statement") {
-      if (!rawData) return { chartData: [], topCats: [] };
-      rows = groupTransactions(rawData, "statement", statementDates);
-    } else {
-      if (!calData) return { chartData: [], topCats: [] };
-      rows = calData.map(r => ({ period: { id: r.month, label: r.month }, cat: r.cat, total: r.total }));
-    }
-
+    const rows = groupByPeriod(transactions, periodMode, statementDates);
     const periodMap = {};
     const catSums = {};
     for (const row of rows) {
@@ -133,7 +94,6 @@ function RollingAverages({ periodMode, statementDates }) {
     }
     const periods = Object.keys(periodMap).sort();
     const top = Object.entries(catSums).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c]) => c);
-
     const cd = periods.map((pid, idx) => {
       const window = periods.slice(Math.max(0, idx - 2), idx + 1);
       const totals = {};
@@ -145,14 +105,13 @@ function RollingAverages({ periodMode, statementDates }) {
       return { period: periodMap[pid].label, ...avg };
     });
     return { chartData: cd, topCats: top };
-  }, [rawData, calData, periodMode, statementDates]);
+  }, [transactions, periodMode, statementDates]);
 
-  if (loading) return <Loader />;
-  if (chartData.length === 0) return <Empty />;
+  if (!chartData.length) return <Empty />;
 
   return (
     <div>
-      <div style={{ fontSize: 12, color: "#555", marginBottom: 16 }}>3-period rolling average spend by top 6 categories</div>
+      <div style={{ fontSize: 12, color: "#555", marginBottom: 16 }}>3-period rolling average — top 6 categories</div>
       <ResponsiveContainer width="100%" height={340}>
         <BarChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: 8 }}>
           <CartesianGrid stroke="#1a1c23" />
@@ -169,49 +128,23 @@ function RollingAverages({ periodMode, statementDates }) {
   );
 }
 
-// ─── Year-to-date / Period-to-date summary ────────────────────────────────────
-function YTD({ periodMode, statementDates }) {
-  const year = new Date().getFullYear();
-  const { data: rawData, loading: rawLoading } = useFetch("/api/transactions/all");
-  const { data: ytdData, loading: ytdLoading } = useFetch(`/api/analytics/ytd`);
-
-  const loading = periodMode === "statement" ? rawLoading : ytdLoading;
-
-  const { data, label } = useMemo(() => {
-    if (periodMode === "statement") {
-      if (!rawData) return { data: [], label: "Current statement" };
-      const today = new Date().toISOString().slice(0, 10);
-      const filtered = rawData.filter(tx => {
-        const dates = statementDates?.[tx.card] || [];
-        const p = getPeriodForDate(today, dates);
-        if (!p) return false;
-        const start = p.start || "0000-00-00";
-        const end = p.end || "9999-99-99";
-        return tx.date >= start && tx.date <= end;
-      });
-      const catMap = {};
-      for (const tx of filtered) {
-        const cat = tx.custom_category || tx.category;
-        catMap[cat] = (catMap[cat] || 0) + tx.amount;
-      }
-      const d = Object.entries(catMap).sort((a, b) => b[1] - a[1]).map(([cat, total]) => ({ cat, total }));
-      const chaseDates = statementDates?.["Chase Sapphire"] || [];
-      const p = getPeriodForDate(today, chaseDates);
-      return { data: d, label: p ? `Current statement: ${p.label}` : "Current statement" };
-    } else {
-      return { data: ytdData || [], label: `${year} year-to-date` };
+function PeriodSummary({ transactions }) {
+  const data = useMemo(() => {
+    const catMap = {};
+    for (const tx of transactions) {
+      const cat = tx.custom_category || tx.category;
+      catMap[cat] = (catMap[cat] || 0) + tx.amount;
     }
-  }, [rawData, ytdData, periodMode, statementDates, year]);
+    return Object.entries(catMap).sort((a, b) => b[1] - a[1]).map(([cat, total]) => ({ cat, total }));
+  }, [transactions]);
 
-  if (loading) return <Loader />;
-  if (!data || data.length === 0) return <Empty />;
-
+  if (!data.length) return <Empty />;
   const total = data.reduce((s, r) => s + r.total, 0);
 
   return (
     <div>
       <div style={{ fontSize: 13, color: "#555", marginBottom: 20 }}>
-        {label} — <span style={{ color: "#4ade80" }}>{fmt(total)} total</span>
+        {transactions.length} transactions — <span style={{ color: "#4ade80" }}>{fmt(total)} total</span>
       </div>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
         <div style={{ flex: "0 0 340px" }}>
@@ -229,7 +162,7 @@ function YTD({ periodMode, statementDates }) {
           ))}
         </div>
         <div style={{ flex: 1, minWidth: 260 }}>
-          <ResponsiveContainer width="100%" height={360}>
+          <ResponsiveContainer width="100%" height={Math.max(200, data.length * 34)}>
             <BarChart data={data} layout="vertical" margin={{ left: 60, right: 20 }}>
               <XAxis type="number" tick={{ fill: "#555", fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(1)}k`} />
               <YAxis type="category" dataKey="cat" tick={{ fill: "#888", fontSize: 11 }} width={120} />
@@ -245,7 +178,6 @@ function YTD({ periodMode, statementDates }) {
   );
 }
 
-// ─── Search / all transactions ────────────────────────────────────────────────
 function SearchAll() {
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
@@ -266,8 +198,6 @@ function SearchAll() {
     setLoading(false);
   }
 
-  function handleKey(e) { if (e.key === "Enter") run(); }
-
   const total = txns.reduce((s, t) => s + t.amount, 0);
 
   return (
@@ -275,7 +205,7 @@ function SearchAll() {
       <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
         <input
           placeholder="Search description or category…"
-          value={search} onChange={e => setSearch(e.target.value)} onKeyDown={handleKey}
+          value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && run()}
           style={{ flex: 1, minWidth: 200, background: "#0d0f14", border: "1px solid #2a2d36", borderRadius: 8, padding: "9px 14px", color: "#e8e8e0", fontFamily: "inherit", fontSize: 12 }}
         />
         <input type="date" value={from} onChange={e => setFrom(e.target.value)}
@@ -288,14 +218,12 @@ function SearchAll() {
           Search
         </button>
       </div>
-
-      {loading && <Loader />}
-
+      {loading && <div style={{ color: "#555", fontSize: 13, padding: "40px 0", textAlign: "center" }}>Loading…</div>}
       {!loading && queried && (
         <>
           <div style={{ fontSize: 12, color: "#555", marginBottom: 12 }}>
             {txns.length} result{txns.length !== 1 ? "s" : ""}
-            {txns.length > 0 && <span style={{ color: "#4ade80", marginLeft: 12 }}>{fmt(total)} total</span>}
+            {txns.length > 0 && <span style={{ color: "#4ade80", marginLeft: 12 }}>{fmt(total)}</span>}
           </div>
           <div style={{ overflowX: "auto", border: "1px solid #1e2029", borderRadius: 10 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -325,28 +253,24 @@ function SearchAll() {
   );
 }
 
-function Loader() {
-  return <div style={{ color: "#555", fontSize: 13, padding: "40px 0", textAlign: "center" }}>Loading…</div>;
-}
 function Empty() {
-  return <div style={{ color: "#555", fontSize: 13, padding: "40px 0", textAlign: "center" }}>No data yet — import some transactions to see history.</div>;
+  return <div style={{ color: "#555", fontSize: 13, padding: "40px 0", textAlign: "center" }}>No data in this range.</div>;
 }
 
-// ─── Main HistoryView ─────────────────────────────────────────────────────────
-const HISTORY_TABS = [
+const SUB_TABS = [
   ["trends", "Trends"],
   ["rolling", "Rolling averages"],
-  ["ytd", "Period summary"],
+  ["summary", "Period summary"],
   ["search", "Search all"],
 ];
 
-export default function HistoryView({ periodMode, statementDates }) {
+export default function HistoryView({ transactions, periodMode, statementDates }) {
   const [sub, setSub] = useState("trends");
 
   return (
     <div>
       <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #1a1c23", marginBottom: 28 }}>
-        {HISTORY_TABS.map(([id, label]) => (
+        {SUB_TABS.map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)} style={{
             background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
             fontSize: 12, padding: "8px 16px", color: sub === id ? "#4ade80" : "#555",
@@ -355,9 +279,9 @@ export default function HistoryView({ periodMode, statementDates }) {
           }}>{label}</button>
         ))}
       </div>
-      {sub === "trends" && <TrendsChart periodMode={periodMode} statementDates={statementDates} />}
-      {sub === "rolling" && <RollingAverages periodMode={periodMode} statementDates={statementDates} />}
-      {sub === "ytd" && <YTD periodMode={periodMode} statementDates={statementDates} />}
+      {sub === "trends" && <TrendsChart transactions={transactions} periodMode={periodMode} statementDates={statementDates} />}
+      {sub === "rolling" && <RollingAverages transactions={transactions} periodMode={periodMode} statementDates={statementDates} />}
+      {sub === "summary" && <PeriodSummary transactions={transactions} />}
       {sub === "search" && <SearchAll />}
     </div>
   );
