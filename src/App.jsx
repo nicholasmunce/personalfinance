@@ -235,7 +235,7 @@ export default function App() {
         ))}
 
         {tab === "analytics" && (
-          <AnalyticsView transactions={transactions} periodMode={periodMode} statementDates={statementDates} />
+          <AnalyticsView transactions={transactions} />
         )}
 
         {tab === "transactions" && (
