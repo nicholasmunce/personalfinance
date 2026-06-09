@@ -109,11 +109,12 @@ function generateInsights(transactions) {
   }
   const topCat = Object.entries(catMap).sort((a,b) => b[1]-a[1])[0];
 
-  // Most visited merchant
+  // Most visited merchant (normalize away trailing codes)
+  function norm(desc) { return desc.replace(/\s+[\d*#]+$/, "").replace(/\s{2,}/g, " ").trim(); }
   const merchantCount = {};
   const merchantTotal = {};
   for (const t of debits) {
-    const key = t.description.slice(0, 20).trim();
+    const key = norm(t.description);
     merchantCount[key] = (merchantCount[key] || 0) + 1;
     merchantTotal[key] = (merchantTotal[key] || 0) + t.amount;
   }
@@ -143,8 +144,8 @@ function generateInsights(transactions) {
   if (topBySpend) insights.push(`Most spent at **${topBySpend[0]}** — ${fmt(topBySpend[1])} total.`);
   if (peakMonth) insights.push(`Biggest month was **${peakMonth[0]}** at ${fmt(peakMonth[1])}.`);
   if (avgMonth > 0 && months.length > 1) insights.push(`Average monthly spend: **${fmt(avgMonth)}**.`);
-  if (biggest) insights.push(`Largest single purchase: **${biggest.description}** — ${fmt(biggest.amount)}.`);
-  if (total > 0) insights.push(`${(checking/total*100).toFixed(0)}% of spend (${fmt(checking)}) goes through the **joint checking** account.`);
+  if (biggest) insights.push(`Largest single purchase: **${norm(biggest.description)}** — ${fmt(biggest.amount)}.`);
+  if (total > 0 && checking > 0) insights.push(`${(checking/total*100).toFixed(0)}% of spend (${fmt(checking)}) is tagged **Checking**.`);
 
   return insights;
 }
@@ -453,6 +454,70 @@ function QueryResults({ result, onClear }) {
   );
 }
 
+function DayOfWeekChart({ transactions }) {
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const DAY_COLORS = ["#a78bfa","#60a5fa","#60a5fa","#60a5fa","#60a5fa","#4ade80","#a78bfa"];
+
+  const data = useMemo(() => {
+    const totals = Array(7).fill(0);
+    const counts = Array(7).fill(0);
+    for (const t of transactions.filter(t => t.type !== "payment")) {
+      // new Date(YYYY-MM-DD) parses as UTC midnight — add T12:00 to avoid timezone day-shift
+      const d = new Date(t.date + "T12:00:00");
+      const dow = d.getDay();
+      totals[dow] += t.amount;
+      counts[dow]++;
+    }
+    return DAYS.map((day, i) => ({
+      day,
+      total: totals[i],
+      count: counts[i],
+      avg: counts[i] ? totals[i] / counts[i] : 0,
+    }));
+  }, [transactions]);
+
+  const maxTotal = Math.max(...data.map(d => d.total), 1);
+
+  const CustomTooltip = ({ active, payload }) => {
+    if (!active || !payload?.[0]) return null;
+    const d = payload[0].payload;
+    return (
+      <div style={{ background: "#1a1c23", border: "1px solid #2a2d36", borderRadius: 8, padding: "10px 14px", fontSize: 12 }}>
+        <div style={{ color: "#e8e8e0", fontWeight: 600, marginBottom: 4 }}>{d.day}</div>
+        <div style={{ color: "#4ade80" }}>{fmt(d.total)} total</div>
+        <div style={{ color: "#555", marginTop: 2 }}>{d.count} transactions</div>
+        {d.count > 0 && <div style={{ color: "#888", marginTop: 2 }}>{fmt(d.avg)} avg per txn</div>}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 14, padding: "22px 24px" }}>
+      <div style={{ fontSize: 11, color: "#555", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 18 }}>Spend by day of week</div>
+      <ResponsiveContainer width="100%" height={180}>
+        <BarChart data={data} barCategoryGap="20%">
+          <XAxis dataKey="day" tick={{ fill: "#555", fontSize: 11 }} axisLine={false} tickLine={false} />
+          <YAxis hide />
+          <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(255,255,255,.04)" }} />
+          <Bar dataKey="total" radius={[4, 4, 0, 0]}>
+            {data.map((entry, i) => (
+              <Cell key={i} fill={DAY_COLORS[i]} opacity={entry.total === maxTotal ? 1 : 0.5} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
+        {data.map((d, i) => d.count > 0 && (
+          <div key={d.day} style={{ fontSize: 11, color: "#444" }}>
+            <span style={{ color: DAY_COLORS[i], opacity: d.total === maxTotal ? 1 : 0.6 }}>{d.day}</span>
+            {" "}{fmt(d.total)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function AnalyticsView({ transactions }) {
   const [query, setQuery] = useState("");
@@ -565,6 +630,9 @@ export default function AnalyticsView({ transactions }) {
           <BiggestPurchases transactions={transactions} />
         </div>
       </div>
+
+      {/* Day of week */}
+      <DayOfWeekChart transactions={transactions} />
 
       {/* Insights */}
       {insights.length > 0 && (
