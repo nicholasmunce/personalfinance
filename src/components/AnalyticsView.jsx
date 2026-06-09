@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 import { fmt } from '../utils/format.js';
+import MerchantSpotlight from './MerchantSpotlight.jsx';
+import SpendMap from './SpendMap.jsx';
 
 const CAT_COLORS = [
   "#4ade80","#60a5fa","#f472b6","#fbbf24","#a78bfa",
@@ -630,6 +632,12 @@ export default function AnalyticsView({ transactions }) {
           <BiggestPurchases transactions={transactions} />
         </div>
       </div>
+
+      {/* Merchant spotlight — click to drill into any merchant */}
+      <MerchantSpotlight transactions={transactions} />
+
+      {/* Spend map — geocoded bubble map */}
+      <SpendMap transactions={transactions} />
 
       {/* Day of week */}
       <DayOfWeekChart transactions={transactions} />
