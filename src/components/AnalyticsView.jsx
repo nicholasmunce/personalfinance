@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from 'recharts';
 import { fmt } from '../utils/format.js';
 
@@ -157,6 +157,132 @@ function KPICard({ label, value, sub, color = "#e8e8e0" }) {
       <div style={{ fontSize: 10, color: "#444", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 8 }}>{label}</div>
       <div style={{ fontFamily: "'Fraunces', serif", fontSize: 24, fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: "#555", marginTop: 6 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function Top3Card({ transactions }) {
+  const top3 = useMemo(() => {
+    return transactions
+      .filter(t => t.type !== "payment")
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 3);
+  }, [transactions]);
+
+  return (
+    <div style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 12, padding: "18px 20px" }}>
+      <div style={{ fontSize: 10, color: "#444", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 10 }}>Top 3 transactions</div>
+      {top3.map((t, i) => (
+        <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: i < top3.length - 1 ? 8 : 0, marginBottom: i < top3.length - 1 ? 8 : 0, borderBottom: i < top3.length - 1 ? "1px solid #1a1c23" : "none" }}>
+          <div>
+            <div style={{ fontSize: 12, color: "#ccc", maxWidth: 170, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.description}</div>
+            <div style={{ fontSize: 10, color: "#444", marginTop: 2 }}>{t.date}</div>
+          </div>
+          <div style={{ fontFamily: "'Fraunces', serif", fontSize: 15, fontWeight: 700, color: "#f87171", whiteSpace: "nowrap", marginLeft: 8 }}>{fmt(t.amount)}</div>
+        </div>
+      ))}
+      {top3.length === 0 && <div style={{ color: "#444", fontSize: 12 }}>No data</div>}
+    </div>
+  );
+}
+
+function CategoryTrends({ transactions }) {
+  const [prevTxns, setPrevTxns] = useState([]);
+
+  // Derive current period bounds from the transactions
+  const { curFrom, curTo, prevFrom, prevTo } = useMemo(() => {
+    const debits = transactions.filter(t => t.type !== "payment");
+    if (!debits.length) return {};
+    const dates = debits.map(t => t.date).sort();
+    const curFrom = dates[0];
+    const curTo = dates[dates.length - 1];
+    const days = Math.round((new Date(curTo) - new Date(curFrom)) / 86400000) + 1;
+    const prevToDate = new Date(new Date(curFrom) - 86400000);
+    const prevFromDate = new Date(prevToDate - (days - 1) * 86400000);
+    const fmt2 = d => d.toISOString().slice(0, 10);
+    return { curFrom, curTo, prevFrom: fmt2(prevFromDate), prevTo: fmt2(prevToDate) };
+  }, [transactions]);
+
+  useEffect(() => {
+    if (!prevFrom || !prevTo) return;
+    const params = new URLSearchParams({ from: prevFrom, to: prevTo });
+    fetch(`/api/transactions?${params}`)
+      .then(r => r.json())
+      .then(rows => setPrevTxns(rows.filter(t => t.type !== "payment")))
+      .catch(() => {});
+  }, [prevFrom, prevTo]);
+
+  const buildCatMap = (txns) => {
+    const map = {};
+    for (const t of txns) {
+      const c = t.custom_category || t.category;
+      map[c] = (map[c] || 0) + t.amount;
+    }
+    return map;
+  };
+
+  const { curMap, prevMap, categories } = useMemo(() => {
+    const curMap = buildCatMap(transactions.filter(t => t.type !== "payment"));
+    const prevMap = buildCatMap(prevTxns);
+    const allCats = new Set([...Object.keys(curMap), ...Object.keys(prevMap)]);
+    // Sort by current period spend desc
+    const categories = [...allCats].sort((a, b) => (curMap[b] || 0) - (curMap[a] || 0)).slice(0, 8);
+    return { curMap, prevMap, categories };
+  }, [transactions, prevTxns]);
+
+  const maxVal = Math.max(...categories.map(c => Math.max(curMap[c] || 0, prevMap[c] || 0)), 1);
+
+  const periodLabel = prevFrom ? `${prevFrom} – ${prevTo}` : "";
+
+  return (
+    <div style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 14, padding: "22px 24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+        <div style={{ fontSize: 11, color: "#555", letterSpacing: ".08em", textTransform: "uppercase" }}>Category trends</div>
+        {periodLabel && <div style={{ fontSize: 10, color: "#333" }}>vs {periodLabel}</div>}
+      </div>
+      <div style={{ display: "flex", gap: 20, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ width: 10, height: 10, borderRadius: 2, background: "#4ade80" }} />
+          <span style={{ fontSize: 10, color: "#555" }}>This period</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ width: 10, height: 10, borderRadius: 2, background: "#2a2d36" }} />
+          <span style={{ fontSize: 10, color: "#555" }}>Prior period</span>
+        </div>
+      </div>
+      {categories.map((cat, i) => {
+        const cur = curMap[cat] || 0;
+        const prev = prevMap[cat] || 0;
+        const delta = cur - prev;
+        const deltaColor = delta > 0 ? "#f87171" : "#4ade80";
+        return (
+          <div key={cat} style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+              <span style={{ fontSize: 12, color: "#ccc" }}>{cat}</span>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#888" }}>{fmt(cur)}</span>
+                {prev > 0 && (
+                  <span style={{ fontSize: 10, color: deltaColor }}>
+                    {delta > 0 ? "↑" : "↓"} {fmt(Math.abs(delta))}
+                  </span>
+                )}
+                {prev === 0 && cur > 0 && <span style={{ fontSize: 10, color: "#555" }}>new</span>}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 3, flexDirection: "column" }}>
+              {/* Current bar */}
+              <div style={{ background: "#0d0f14", borderRadius: 3, height: 5, overflow: "hidden" }}>
+                <div style={{ width: `${(cur / maxVal) * 100}%`, height: "100%", background: "#4ade80", borderRadius: 3, transition: "width .4s" }} />
+              </div>
+              {/* Prior bar */}
+              <div style={{ background: "#0d0f14", borderRadius: 3, height: 5, overflow: "hidden" }}>
+                <div style={{ width: `${(prev / maxVal) * 100}%`, height: "100%", background: "#2a2d36", borderRadius: 3, transition: "width .4s" }} />
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {categories.length === 0 && <div style={{ color: "#444", fontSize: 12 }}>No data</div>}
     </div>
   );
 }
@@ -356,11 +482,6 @@ export default function AnalyticsView({ transactions }) {
     return Object.entries(map).sort((a, b) => b[1] - a[1])[0];
   }, [debits]);
 
-  const checkingPct = useMemo(() => {
-    if (!total) return 0;
-    return debits.filter(t => t.owner === "C").reduce((s, t) => s + t.amount, 0) / total * 100;
-  }, [debits, total]);
-
   const insights = useMemo(() => generateInsights(transactions), [transactions]);
 
   function submitQuery(q) {
@@ -414,7 +535,7 @@ export default function AnalyticsView({ transactions }) {
         <KPICard label="Total spend" value={fmt(total)} sub={`${debits.length} transactions`} color="#4ade80" />
         <KPICard label="Top category" value={topCat?.[0] || "—"} sub={topCat ? fmt(topCat[1]) : ""} color="#fbbf24" />
         <KPICard label="Most visited" value={topMerchant?.[0] || "—"} sub={topMerchant ? `${topMerchant[1]} visits` : ""} color="#a78bfa" />
-        <KPICard label="Joint checking" value={`${checkingPct.toFixed(0)}%`} sub={fmt(debits.filter(t => t.owner === "C").reduce((s,t) => s+t.amount, 0))} color="#60a5fa" />
+        <Top3Card transactions={transactions} />
       </div>
 
       {/* Category + Trend */}
@@ -430,28 +551,8 @@ export default function AnalyticsView({ transactions }) {
         </div>
       </div>
 
-      {/* Owner split */}
-      <div style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 14, padding: "22px 24px" }}>
-        <div style={{ fontSize: 11, color: "#555", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 16 }}>Spend by owner</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-          {["C","N","M","X"].map(o => {
-            const amt = debits.filter(t => t.owner === o).reduce((s,t) => s+t.amount, 0);
-            const pct = total ? (amt/total*100).toFixed(1) : 0;
-            return (
-              <div key={o}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 12, color: OWNER_COLORS[o] }}>{OWNER_LABELS[o]}</span>
-                  <span style={{ fontSize: 11, color: "#444" }}>{pct}%</span>
-                </div>
-                <div style={{ background: "#0d0f14", borderRadius: 4, height: 6 }}>
-                  <div style={{ width: `${pct}%`, height: "100%", background: OWNER_COLORS[o], borderRadius: 4 }} />
-                </div>
-                <div style={{ fontSize: 13, color: "#e8e8e0", marginTop: 6, fontFamily: "'Fraunces', serif", fontWeight: 700 }}>{fmt(amt)}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* Category trends — current vs previous period */}
+      <CategoryTrends transactions={transactions} />
 
       {/* Top merchants + Biggest purchases */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
