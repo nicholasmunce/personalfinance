@@ -289,7 +289,7 @@ function CategoryTrends({ transactions }) {
   );
 }
 
-function CategoryBars({ transactions }) {
+function CategoryBars({ transactions, budgets }) {
   const debits = transactions.filter(t => t.type !== "payment");
   const total = debits.reduce((s, t) => s + t.amount, 0);
   const catMap = {};
@@ -302,19 +302,47 @@ function CategoryBars({ transactions }) {
 
   return (
     <div>
-      {cats.map(([cat, amt], i) => (
-        <div key={cat} style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-            <span style={{ fontSize: 12, color: "#ccc" }}>{cat}</span>
-            <span style={{ fontSize: 12, color: "#888" }}>
-              {fmt(amt)} <span style={{ color: "#444", marginLeft: 6 }}>{(amt/total*100).toFixed(1)}%</span>
-            </span>
+      {cats.map(([cat, amt], i) => {
+        const budgetEntry = budgets?.[cat];
+        const budgetAmt = budgetEntry?.monthly_budget;
+        const hasBudget = budgetAmt != null && budgetAmt > 0;
+        const pct = hasBudget ? (amt / budgetAmt) * 100 : 0;
+        const budgetBarColor = pct < 70 ? "#4ade80" : pct <= 100 ? "#fbbf24" : "#f87171";
+
+        return (
+          <div key={cat} style={{ marginBottom: hasBudget ? 14 : 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 12, color: "#ccc" }}>{cat}</span>
+              <span style={{ fontSize: 12, color: "#888" }}>
+                {fmt(amt)} <span style={{ color: "#444", marginLeft: 6 }}>{(amt/total*100).toFixed(1)}%</span>
+              </span>
+            </div>
+            {/* Spend bar */}
+            <div style={{ background: "#0d0f14", borderRadius: 4, height: 6, overflow: "hidden" }}>
+              <div style={{ width: `${(amt/max)*100}%`, height: "100%", background: CAT_COLORS[i % CAT_COLORS.length], borderRadius: 4, transition: "width .4s" }} />
+            </div>
+            {/* Budget progress bar */}
+            {hasBudget && (
+              <div style={{ marginTop: 5 }}>
+                <div style={{ background: "#0d0f14", borderRadius: 4, height: 4, overflow: "hidden", marginBottom: 4 }}>
+                  <div style={{
+                    width: `${Math.min(pct, 100)}%`,
+                    height: "100%",
+                    background: budgetBarColor,
+                    borderRadius: 4,
+                    transition: "width .4s",
+                    opacity: 0.75,
+                  }} />
+                </div>
+                <div style={{ fontSize: 11, color: "#555" }}>
+                  {fmt(amt)} / {fmt(budgetAmt)} budget
+                  {" "}<span style={{ color: budgetBarColor }}>({pct.toFixed(0)}%)</span>
+                </div>
+              </div>
+            )}
           </div>
-          <div style={{ background: "#0d0f14", borderRadius: 4, height: 6, overflow: "hidden" }}>
-            <div style={{ width: `${(amt/max)*100}%`, height: "100%", background: CAT_COLORS[i % CAT_COLORS.length], borderRadius: 4, transition: "width .4s" }} />
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -519,11 +547,92 @@ function DayOfWeekChart({ transactions }) {
   );
 }
 
+function RecurringCharges() {
+  const [items, setItems] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/analytics/recurring")
+      .then(r => r.json())
+      .then(data => setItems(data))
+      .catch(() => setItems([]));
+  }, []);
+
+  const totalMonthly = useMemo(() => {
+    if (!items) return 0;
+    return items.reduce((s, r) => s + r.avg_amount, 0);
+  }, [items]);
+
+  if (items === null) {
+    return (
+      <div style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 14, padding: "22px 24px" }}>
+        <div style={{ fontSize: 11, color: "#555", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4 }}>Recurring Charges</div>
+        <div style={{ fontSize: 12, color: "#444", marginTop: 12 }}>Loading…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 14, padding: "22px 24px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 11, color: "#555", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4 }}>Recurring Charges</div>
+          <div style={{ fontSize: 11, color: "#444" }}>transactions appearing 3+ months</div>
+        </div>
+        {items.length > 0 && (
+          <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}>
+            <div style={{ fontSize: 11, color: "#555", marginBottom: 3 }}>{items.length} recurring charge{items.length !== 1 ? "s" : ""}</div>
+            <div style={{ fontFamily: "'Fraunces', serif", fontSize: 18, fontWeight: 700, color: "#4ade80" }}>~{fmt(totalMonthly)}<span style={{ fontSize: 11, color: "#555", fontFamily: "inherit", fontWeight: 400 }}>/mo est.</span></div>
+          </div>
+        )}
+      </div>
+
+      {items.length === 0 ? (
+        <div style={{ fontSize: 12, color: "#444", paddingTop: 4 }}>No recurring patterns detected</div>
+      ) : (
+        <div>
+          {/* Header row */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 100px 80px 100px", gap: 8, padding: "0 0 8px", borderBottom: "1px solid #1e2029", marginBottom: 4 }}>
+            <span style={{ fontSize: 10, color: "#333", letterSpacing: ".07em", textTransform: "uppercase" }}>Merchant</span>
+            <span style={{ fontSize: 10, color: "#333", letterSpacing: ".07em", textTransform: "uppercase", textAlign: "right" }}>Avg amount</span>
+            <span style={{ fontSize: 10, color: "#333", letterSpacing: ".07em", textTransform: "uppercase", textAlign: "right" }}>Months</span>
+            <span style={{ fontSize: 10, color: "#333", letterSpacing: ".07em", textTransform: "uppercase", textAlign: "right" }}>Est. monthly</span>
+          </div>
+          {items.map((r, i) => {
+            const label = r.description.length > 35 ? r.description.slice(0, 34) + "…" : r.description;
+            return (
+              <div key={r.description} style={{ display: "grid", gridTemplateColumns: "1fr 100px 80px 100px", gap: 8, padding: "9px 0", borderBottom: i < items.length - 1 ? "1px solid #141618" : "none", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#ccc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.description}>{label}</span>
+                <span style={{ fontSize: 12, color: "#888", textAlign: "right" }}>{fmt(r.avg_amount)}</span>
+                <span style={{ fontSize: 11, color: "#555", textAlign: "right" }}>{r.months_seen} mo</span>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <span style={{ background: "#0d1a11", border: "1px solid #1a3d20", borderRadius: 6, padding: "2px 8px", fontSize: 11, color: "#4ade80", whiteSpace: "nowrap" }}>{fmt(r.avg_amount)}/mo</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function AnalyticsView({ transactions }) {
   const [query, setQuery] = useState("");
   const [queryResult, setQueryResult] = useState(null);
+  const [budgetMap, setBudgetMap] = useState({}); // { category -> { id, monthly_budget } }
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    fetch("/api/budgets")
+      .then(r => r.json())
+      .then(rows => {
+        const map = {};
+        for (const b of rows) map[b.category] = { id: b.id, monthly_budget: b.monthly_budget };
+        setBudgetMap(map);
+      })
+      .catch(() => {});
+  }, []);
 
   const debits = useMemo(() => transactions.filter(t => t.type !== "payment"), [transactions]);
   const total = useMemo(() => debits.reduce((s, t) => s + t.amount, 0), [debits]);
@@ -608,7 +717,7 @@ export default function AnalyticsView({ transactions }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
         <div style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 14, padding: "22px 24px" }}>
           <div style={{ fontSize: 11, color: "#555", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 18 }}>Spending by category</div>
-          <CategoryBars transactions={transactions} />
+          <CategoryBars transactions={transactions} budgets={budgetMap} />
         </div>
         <div style={{ background: "#13151c", border: "1px solid #1e2029", borderRadius: 14, padding: "22px 24px" }}>
           <div style={{ fontSize: 11, color: "#555", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 18 }}>Monthly trend</div>
@@ -631,6 +740,9 @@ export default function AnalyticsView({ transactions }) {
           <BiggestPurchases transactions={transactions} />
         </div>
       </div>
+
+      {/* Recurring charges detector */}
+      <RecurringCharges />
 
       {/* Merchant spotlight — click to drill into any merchant */}
       <MerchantSpotlight transactions={transactions} />
