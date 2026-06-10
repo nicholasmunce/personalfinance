@@ -3,6 +3,7 @@ import { OWNERS } from '../constants.js';
 import { fmt } from '../utils/format.js';
 
 const OWNER_LABELS = { C: "Checking", N: "Nick", M: "Madeline", X: "Non-Chk" };
+const OWNER_EXPORT_LABELS = { C: "Checking", N: "Nick", M: "Madeline", X: "Non-Checking" };
 const OWNER_COLORS = { C: "#4ade80", N: "#60a5fa", M: "#f472b6", X: "#fb923c" };
 
 const CARDS = ["Chase Sapphire", "Capital One"];
@@ -99,6 +100,31 @@ export default function TransactionsView({ transactions, onOwnerChange, onDelete
     await Promise.all(filtered.map(t => handleOwner(t.id, owner)));
   }
 
+  function exportCSV() {
+    const csvField = (val) => {
+      const s = String(val ?? "");
+      return s.includes(",") ? `"${s}"` : s;
+    };
+    const headers = ["Date", "Description", "Category", "Amount", "Card", "Owner"];
+    const rows = filtered.map(t => [
+      csvField(t.date),
+      csvField(t.description),
+      csvField(t.custom_category || t.category),
+      csvField(t.amount),
+      csvField(t.card),
+      csvField(OWNER_EXPORT_LABELS[t.owner] || t.owner),
+    ].join(","));
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const today = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `transactions-${today}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div>
       <StatsGrid transactions={filtered} />
@@ -123,6 +149,7 @@ export default function TransactionsView({ transactions, onOwnerChange, onDelete
             </button>
           ))}
         </div>
+        <button className="filter-btn" onClick={exportCSV}>▼ Export CSV</button>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
           <span style={{ fontSize: 11, color: "#444" }}>Bulk tag:</span>
           {OWNERS.map(o => (
