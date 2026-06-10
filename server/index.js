@@ -34,6 +34,12 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_date ON transactions(date);
+
+  CREATE TABLE IF NOT EXISTS budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT UNIQUE NOT NULL,
+    monthly_budget REAL NOT NULL
+  );
 `);
 
 // Migrate any MM/DD/YYYY dates to YYYY-MM-DD
@@ -199,6 +205,24 @@ app.delete("/api/transactions/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+// Recurring subscription detector
+app.get("/api/analytics/recurring", (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      description,
+      AVG(amount) AS avg_amount,
+      COUNT(*) AS total_count,
+      COUNT(DISTINCT strftime('%Y-%m', date)) AS months_seen,
+      MAX(date) AS last_seen
+    FROM transactions
+    WHERE type = 'debit'
+    GROUP BY description
+    HAVING COUNT(DISTINCT strftime('%Y-%m', date)) >= 3
+    ORDER BY avg_amount DESC
+  `).all();
+  res.json(rows);
+});
+
 // Current balance per card: charges since last payment
 app.get("/api/balance", (req, res) => {
   const cards = ["Chase Sapphire", "Capital One"];
@@ -229,6 +253,24 @@ app.get("/api/balance", (req, res) => {
     }
   }
   res.json(result);
+});
+
+// Budgets
+app.get("/api/budgets", (req, res) => {
+  res.json(db.prepare("SELECT * FROM budgets ORDER BY category ASC").all());
+});
+
+app.post("/api/budgets", (req, res) => {
+  const { category, monthly_budget } = req.body;
+  if (!category || monthly_budget == null) return res.status(400).json({ error: "category and monthly_budget required" });
+  db.prepare("INSERT OR REPLACE INTO budgets (category, monthly_budget) VALUES (?, ?)").run(category, monthly_budget);
+  const row = db.prepare("SELECT * FROM budgets WHERE category = ?").get(category);
+  res.json(row);
+});
+
+app.delete("/api/budgets/:id", (req, res) => {
+  db.prepare("DELETE FROM budgets WHERE id = ?").run(req.params.id);
+  res.json({ ok: true });
 });
 
 const PORT = 3001;

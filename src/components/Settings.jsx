@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 const CARDS = [
   { key: "Chase Sapphire", label: "Chase Sapphire", color: "#f59e0b" },
@@ -10,6 +10,13 @@ export default function Settings({ onSettingsChange }) {
   const [loading, setLoading] = useState(true);
   const [newDate, setNewDate] = useState({ "Chase Sapphire": "", "Capital One": "" });
 
+  // Budget state
+  const [categories, setCategories] = useState([]);
+  const [budgets, setBudgets] = useState({}); // { category -> { id, monthly_budget } }
+  const [budgetInputs, setBudgetInputs] = useState({}); // { category -> string value in input }
+  const [savedFlags, setSavedFlags] = useState({}); // { category -> bool } for "Saved" flash
+  const savedTimers = useRef({});
+
   async function load() {
     const data = await fetch("/api/statement-dates").then(r => r.json());
     setRows(data);
@@ -17,7 +24,56 @@ export default function Settings({ onSettingsChange }) {
     onSettingsChange?.(toMap(data));
   }
 
-  useEffect(() => { load(); }, []);
+  async function loadBudgets() {
+    const [budgetData, txData] = await Promise.all([
+      fetch("/api/budgets").then(r => r.json()),
+      fetch("/api/transactions/all").then(r => r.json()),
+    ]);
+
+    // Unique categories from transactions
+    const cats = [...new Set(
+      txData
+        .map(t => t.custom_category || t.category)
+        .filter(c => c && c.trim())
+    )].sort();
+    setCategories(cats);
+
+    // Build budgets map
+    const budgetMap = {};
+    const inputMap = {};
+    for (const b of budgetData) {
+      budgetMap[b.category] = { id: b.id, monthly_budget: b.monthly_budget };
+      inputMap[b.category] = String(b.monthly_budget);
+    }
+    setBudgets(budgetMap);
+    setBudgetInputs(prev => {
+      const merged = { ...inputMap };
+      // Keep any user edits that haven't been saved yet for categories not in budgetMap
+      for (const cat of cats) {
+        if (!(cat in merged)) merged[cat] = prev[cat] ?? "";
+      }
+      return merged;
+    });
+  }
+
+  useEffect(() => { load(); loadBudgets(); }, []);
+
+  async function saveBudget(cat) {
+    const val = parseFloat(budgetInputs[cat]);
+    if (isNaN(val) || val < 0) return;
+    await fetch("/api/budgets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category: cat, monthly_budget: val }),
+    });
+    await loadBudgets();
+    // Show "Saved" flash
+    setSavedFlags(prev => ({ ...prev, [cat]: true }));
+    clearTimeout(savedTimers.current[cat]);
+    savedTimers.current[cat] = setTimeout(() => {
+      setSavedFlags(prev => ({ ...prev, [cat]: false }));
+    }, 2000);
+  }
 
   function toMap(data) {
     const map = {};
@@ -139,6 +195,78 @@ export default function Settings({ onSettingsChange }) {
           Add each statement close date as it happens. A period runs from the day after the previous close date up to and including the next close date — matching exactly how your credit card billing cycles work.<br />
           Toggle <strong style={{ color: "#888" }}>Calendar / Statement</strong> in the header to switch all views.
         </div>
+      </div>
+
+      {/* Monthly Budgets */}
+      <div style={{ marginTop: 32 }}>
+        <div style={{ fontFamily: "'Fraunces', serif", fontSize: 17, fontWeight: 900, color: "#fff", marginBottom: 6 }}>Monthly Budgets</div>
+        <div style={{ fontSize: 12, color: "#555", marginBottom: 20, lineHeight: 1.7 }}>
+          Set a monthly spending limit per category. Progress bars will appear in the Analytics view.
+        </div>
+
+        {categories.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#333", fontStyle: "italic" }}>No categories found. Import transactions first.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {categories.map(cat => (
+              <div key={cat} style={{
+                display: "flex", alignItems: "center", gap: 10,
+                background: "#13151c", border: "1px solid #1e2029",
+                borderRadius: 8, padding: "10px 14px",
+              }}>
+                <span style={{ fontSize: 12, color: "#ccc", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cat}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12, color: "#555" }}>$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="—"
+                    value={budgetInputs[cat] ?? ""}
+                    onChange={e => setBudgetInputs(prev => ({ ...prev, [cat]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === "Enter") saveBudget(cat); }}
+                    style={{
+                      width: 90,
+                      background: "#0d0f14",
+                      border: "1px solid #2a2d36",
+                      borderRadius: 6,
+                      padding: "6px 10px",
+                      color: "#e8e8e0",
+                      fontFamily: "inherit",
+                      fontSize: 12,
+                      outline: "none",
+                      textAlign: "right",
+                    }}
+                    onFocus={e => e.target.style.borderColor = "#4ade80"}
+                    onBlur={e => e.target.style.borderColor = "#2a2d36"}
+                  />
+                  <button
+                    onClick={() => saveBudget(cat)}
+                    disabled={!budgetInputs[cat] || isNaN(parseFloat(budgetInputs[cat]))}
+                    style={{
+                      background: (budgetInputs[cat] && !isNaN(parseFloat(budgetInputs[cat]))) ? "#4ade80" : "transparent",
+                      border: "1px solid #4ade8044",
+                      borderRadius: 6,
+                      padding: "6px 12px",
+                      color: (budgetInputs[cat] && !isNaN(parseFloat(budgetInputs[cat]))) ? "#0d0f14" : "#4ade80",
+                      fontFamily: "inherit",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: (budgetInputs[cat] && !isNaN(parseFloat(budgetInputs[cat]))) ? "pointer" : "not-allowed",
+                      opacity: (budgetInputs[cat] && !isNaN(parseFloat(budgetInputs[cat]))) ? 1 : 0.4,
+                      transition: "all .15s",
+                    }}
+                  >
+                    Save
+                  </button>
+                  {savedFlags[cat] && (
+                    <span style={{ fontSize: 11, color: "#4ade80", minWidth: 36 }}>Saved</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
